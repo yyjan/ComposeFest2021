@@ -179,8 +179,7 @@ fun Home() {
     val lazyListState = rememberLazyListState()
 
     // The background color. The value is changed by the current tab.
-    // TODO 1: Animate this color change.
-    val backgroundColor = if (tabPage == TabPage.Home) Purple100 else Green300
+    val backgroundColor by animateColorAsState(if (tabPage == TabPage.Home) Purple100 else Green300)
 
     // The coroutine scope for event handlers calling suspend functions.
     val coroutineScope = rememberCoroutineScope()
@@ -279,7 +278,7 @@ fun Home() {
 @Composable
 private fun HomeFloatingActionButton(
     extended: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
     // Use `FloatingActionButton` rather than `ExtendedFloatingActionButton` for full control on
     // how it should animate.
@@ -292,8 +291,7 @@ private fun HomeFloatingActionButton(
                 contentDescription = null
             )
             // Toggle the visibility of the content with animation.
-            // TODO 2-1: Animate this visibility change.
-            if (extended) {
+            AnimatedVisibility(extended) {
                 Text(
                     text = stringResource(R.string.edit),
                     modifier = Modifier
@@ -310,10 +308,17 @@ private fun HomeFloatingActionButton(
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun EditMessage(shown: Boolean) {
-    // TODO 2-2: The message should slide down from the top on appearance and slide up on
-    //           disappearance.
     AnimatedVisibility(
-        visible = shown
+        visible = shown,
+        enter = slideInVertically(
+            initialOffsetY = { fullHeight -> -fullHeight },
+            animationSpec = tween(durationMillis = 150, easing = LinearOutSlowInEasing)
+        ),
+        exit = slideOutVertically(
+            // Exits by sliding up from offset 0 to -fullHeight.
+            targetOffsetY = { fullHeight -> -fullHeight },
+            animationSpec = tween(durationMillis = 250, easing = FastOutLinearInEasing)
+        )
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -356,7 +361,7 @@ private fun LazyListState.isScrollingUp(): Boolean {
  */
 @Composable
 private fun Header(
-    title: String
+    title: String,
 ) {
     Text(
         text = title,
@@ -382,11 +387,11 @@ private fun TopicRow(topic: String, expanded: Boolean, onClick: () -> Unit) {
         elevation = 2.dp,
         onClick = onClick
     ) {
-        // TODO 3: Animate the size change of the content.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
+                .animateContentSize()
         ) {
             Row {
                 Icon(
@@ -433,7 +438,7 @@ fun TopicRowSpacer(visible: Boolean) {
 private fun HomeTabBar(
     backgroundColor: Color,
     tabPage: TabPage,
-    onTabSelected: (tabPage: TabPage) -> Unit
+    onTabSelected: (tabPage: TabPage) -> Unit,
 ) {
     TabRow(
         selectedTabIndex = tabPage.ordinal,
@@ -464,12 +469,41 @@ private fun HomeTabBar(
 @Composable
 private fun HomeTabIndicator(
     tabPositions: List<TabPosition>,
-    tabPage: TabPage
+    tabPage: TabPage,
 ) {
-    // TODO 4: Animate these value changes.
-    val indicatorLeft = tabPositions[tabPage.ordinal].left
-    val indicatorRight = tabPositions[tabPage.ordinal].right
-    val color = if (tabPage == TabPage.Home) Purple700 else Green800
+    val transition = updateTransition(
+        tabPage,
+        label = "Tab indicator"
+    )
+    val indicatorLeft by transition.animateDp(
+        transitionSpec = {
+            if (TabPage.Home isTransitioningTo TabPage.Work) {
+                spring(stiffness = Spring.StiffnessVeryLow)
+            } else {
+                spring(stiffness = Spring.StiffnessMedium)
+            }
+        },
+        label = "Indicator left"
+    ) { page ->
+        tabPositions[page.ordinal].left
+    }
+    val indicatorRight by transition.animateDp(
+        transitionSpec = {
+            if (TabPage.Home isTransitioningTo TabPage.Work) {
+                spring(stiffness = Spring.StiffnessMedium)
+            } else {
+                spring(stiffness = Spring.StiffnessVeryLow)
+            }
+        },
+        label = "Indicator right"
+    ) { page ->
+        tabPositions[page.ordinal].right
+    }
+    val color by transition.animateColor(
+        label = "Border color"
+    ) { page ->
+        if (page == TabPage.Home) Purple700 else Green800
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -498,7 +532,7 @@ private fun HomeTab(
     icon: ImageVector,
     title: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
@@ -523,7 +557,7 @@ private fun HomeTab(
  */
 @Composable
 private fun WeatherRow(
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -554,8 +588,18 @@ private fun WeatherRow(
  */
 @Composable
 private fun LoadingRow() {
-    // TODO 5: Animate this value between 0f and 1f, then back to 0f repeatedly.
-    val alpha = 1f
+    val infiniteTransition = rememberInfiniteTransition()
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1000
+                0.7f at 500
+            },
+            repeatMode = RepeatMode.Reverse
+        )
+    )
     Row(
         modifier = Modifier
             .heightIn(min = 64.dp)
@@ -616,47 +660,50 @@ private fun TaskRow(task: String, onRemove: () -> Unit) {
  * @param onDismissed Called when the element is swiped to the edge of the screen.
  */
 private fun Modifier.swipeToDismiss(
-    onDismissed: () -> Unit
+    onDismissed: () -> Unit,
 ): Modifier = composed {
-    // TODO 6-1: Create an Animatable instance for the offset of the swiped element.
+    val offsetX = remember { Animatable(0f) }
     pointerInput(Unit) {
-        // Used to calculate a settling position of a fling animation.
         val decay = splineBasedDecay<Float>(this)
-        // Wrap in a coroutine scope to use suspend functions for touch events and animation.
+
         coroutineScope {
             while (true) {
-                // Wait for a touch down event.
                 val pointerId = awaitPointerEventScope { awaitFirstDown().id }
-                // TODO 6-2: Touch detected; the animation should be stopped.
-                // Prepare for drag events and record velocity of a fling.
+                offsetX.stop()
+
                 val velocityTracker = VelocityTracker()
-                // Wait for drag events.
+
                 awaitPointerEventScope {
                     horizontalDrag(pointerId) { change ->
-                        // TODO 6-3: Apply the drag change to the Animatable offset.
-                        // Record the velocity of the drag.
+                        val horizontalDragOffset = offsetX.value + change.positionChange().x
+                        launch {
+                            offsetX.snapTo(horizontalDragOffset)
+                        }
                         velocityTracker.addPosition(change.uptimeMillis, change.position)
-                        // Consume the gesture event, not passed to external
                         change.consumePositionChange()
                     }
                 }
-                // Dragging finished. Calculate the velocity of the fling.
+
                 val velocity = velocityTracker.calculateVelocity().x
-                // TODO 6-4: Calculate the eventual position where the fling should settle
-                //           based on the current offset value and velocity
-                // TODO 6-5: Set the upper and lower bounds so that the animation stops when it
-                //           reaches the edge.
+                val targetOffsetX = decay.calculateTargetValue(offsetX.value, velocity)
+                offsetX.updateBounds(
+                    lowerBound = -size.width.toFloat(),
+                    upperBound = size.width.toFloat()
+                )
                 launch {
-                    // TODO 6-6: Slide back the element if the settling position does not go beyond
-                    //           the size of the element. Remove the element if it does.
+                    if (targetOffsetX.absoluteValue <= size.width) {
+                        // Not enough velocity; Slide back to the default position.
+                        offsetX.animateTo(targetValue = 0f, initialVelocity = velocity)
+                    } else {
+                        // Enough velocity to slide away the element to the edge.
+                        offsetX.animateDecay(velocity, decay)
+                        // The element was swiped away.
+                        onDismissed()
+                    }
                 }
             }
         }
-    }
-        .offset {
-            // TODO 6-7: Use the animating offset value here.
-            IntOffset(0, 0)
-        }
+    }.offset { IntOffset(offsetX.value.roundToInt(), 0) }
 }
 
 @Preview
